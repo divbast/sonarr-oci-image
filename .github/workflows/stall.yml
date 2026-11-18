@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-License-Identifier: GPL-3.0-only
 # SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
 
 # The daily stall check, through divbast/ci's stall.yml: a Renovate pull
@@ -11,9 +11,9 @@ name: stall
 on:
   schedule:
     # Midway between two daily slots, which GitHub starts hours after
-    # build.yml's 19:07 UTC. Six minutes after the LibreSpeed image's stall
+    # build.yml's 20:07 UTC. Six minutes after oci-image-template's stall
     # check, so the two never start together.
-    - cron: '35 12 * * *'
+    - cron: '41 12 * * *'
   workflow_dispatch:
 
 permissions: {}
@@ -26,7 +26,7 @@ concurrency:
 jobs:
   stall:
     name: stall
-    uses: divbast/ci/.github/workflows/stall.yml@c38d0161d2f28109430979a15955bdba3b3b137d # v3.11.0
+    uses: divbast/ci/.github/workflows/stall.yml@bde821963cf2fb32e1ca67337e5b84ae1114ac1a # v3.12.0
     with:
       # No slots: they count the slots that should have published, and this
       # repository publishes nothing to ghcr.io. An app turns them on once

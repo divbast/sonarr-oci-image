@@ -1,14 +1,14 @@
-// SPDX-License-Identifier: BSD-2-Clause
+// SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
 
-// Command divbast-template is the .NET layer's health probe: the image's
+// Command divbast-sonarr is the .NET layer's health probe: the image's
 // HEALTHCHECK runs it, because an upstream .NET app cannot host a probe
 // subcommand of its own.
 //
 // Usage:
 //
-//	divbast-template health   check the page and /healthz, both on :8080
-//	divbast-template version  print the version
+//	divbast-sonarr health   check the page and /healthz, both on :8080
+//	divbast-sonarr version  print the version
 //
 // health prints nothing when both halves hold, and one "<check>: <reason>"
 // line for each that does not.
@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/divbast/oci-image-template/layers/dotnet/internal/probe"
+	"github.com/divbast/sonarr-oci-image/internal/probe"
 )
 
 // version is set at build time, with -ldflags "-X main.version=…".
@@ -46,6 +46,6 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: divbast-template health|version")
+	fmt.Fprintln(os.Stderr, "usage: divbast-sonarr health|version")
 	os.Exit(2)
 }

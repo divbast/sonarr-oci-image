@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BSD-2-Clause
+// SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
 
 package acceptance
@@ -14,14 +14,13 @@ import (
 const page = "Hello from oci-image-template"
 
 // refused are paths the app port must answer with a 404 and an empty
-// body: a PHP app's script by its own name, /healthz, which only the
-// health port serves, and a path nothing names.
-var refused = []string{"/index.php", "/healthz", "/nope"}
+// body: a PHP app's script by its own name, and a path nothing names.
+var refused = []string{"/index.php", "/nope"}
 
 // TestServes checks the app port, from a client outside the container,
-// through the published port: GET / answers 200 with exactly the page, and
-// every other path a 404 with an empty body, because 8080 is an
-// allowlist.
+// through the published port: GET / answers 200 with exactly the page,
+// GET /healthz 200, and every other path a 404 with an empty body,
+// because 8080 is an allowlist.
 func TestServes(t *testing.T) {
 	t.Parallel()
 	e, image := underTest(t)
@@ -45,6 +44,8 @@ func TestServes(t *testing.T) {
 	if err == nil {
 		harness.Equal(checks, "GET / from the host is exactly the page", page, string(resp.Body))
 	}
+
+	harness.StatusIs(t, s, "GET /healthz from the host answers 200", http.StatusOK, "/healthz")
 
 	for _, path := range refused {
 		what := "GET " + path + " from the host"
