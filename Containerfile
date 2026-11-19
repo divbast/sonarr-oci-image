@@ -11,6 +11,12 @@
 # tag still names it.
 ARG SONARR_VERSION=5.0.0.2997
 ARG SONARR_COMMIT=51a2412af235197ce15d7d4a17c053a8e2c26609
+# The watch for Sonarr's first stable v5 release, which no build reads:
+# Renovate writes it on the line below once GitHub has a v5 release that is
+# not a pre-release, and test/stable's TestNoV5StableYet then fails, so the
+# develop line stops here until the image moves to stable: CLAUDE.md,
+# 'Moving to stable'. 0.0.0.0 stands for none.
+# SONARR_STABLE_V5=0.0.0.0
 # The runtime: Docker Hardened Images' ASP.NET Core on Debian 13, with ICU,
 # OpenSSL and the .NET runtime the app runs on, no shell and no package
 # manager, and its nonroot user 65532. The app is built framework-dependent,
