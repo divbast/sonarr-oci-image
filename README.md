@@ -97,7 +97,11 @@ and no user existed, created 'sonarr' with the password: …`. Read it with
 `podman logs sonarr` (or `docker logs`), sign in, and change it under
 Settings, General. To choose the first password yourself, set
 `SONARR__AUTH__INITIALPASSWORD` for the first start, as
-[Authentication](#authentication) says. A stop (SIGTERM) ends Sonarr well
+[Authentication](#authentication) says. Where Podman logs to journald, as
+it does by default under systemd, journald's rate limit can drop much of a
+first start's log, which lists every database migration, and the password
+line with it: set the password, or run with `--log-driver k8s-file`. A
+stop (SIGTERM) ends Sonarr well
 inside the engine's timeout, with exit 0. Restarting it from its UI
 happens inside the same process, so the container keeps running.
 

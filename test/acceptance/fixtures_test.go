@@ -84,6 +84,22 @@ func noUpstream() []string {
 	return extra
 }
 
+// engineLogs is the flags that have engine e keep every line Sonarr logs,
+// so a test that waits for one, or reads why a container stopped, finds
+// it. Podman logs to journald by default where systemd runs, and journald
+// drops a unit's messages past its rate limit: Sonarr's first start logs
+// each of its database migrations, thousands of lines, and a suite run
+// starting twenty containers at once lost tens of thousands of them, the
+// lines its tests wait for among them. Podman's file log, k8s-file, keeps
+// them all, as Docker's default, json-file, does already. Where the
+// engine keeps its logs is no part of the confinement the contract claims.
+func engineLogs(e harness.Engine) []string {
+	if e.Name() == "podman" {
+		return []string{"--log-driver", "k8s-file"}
+	}
+	return nil
+}
+
 // serveSonarr serves the image under the contract, with env and mounts,
 // and waits until readyPath answers. Sonarr listens only once its
 // database is migrated, so an answer at its ping route means it is up. The
@@ -103,7 +119,7 @@ func serveSonarr(t *testing.T, e harness.Engine, image, readyPath string, env ma
 			Env:       env,
 			Mounts:    mounts,
 			HealthCmd: healthCmd,
-			Extra:     noUpstream(),
+			Extra:     append(noUpstream(), engineLogs(e)...),
 		},
 		AppPort:   appPort,
 		ReadyPath: readyPath,

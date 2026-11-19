@@ -33,7 +33,7 @@ func TestRefusesUnwritableConfig(t *testing.T) {
 	e, image := underTest(t)
 	vol := configVolume(t, e)
 	prepare(t, e, image, asRoot, vol, "root-own")
-	harness.Refuses(t, e, refusing(image, vol), nonRecoverableFailure, "on a /config root owns", notWritable)
+	harness.Refuses(t, e, refusing(e, image, vol), nonRecoverableFailure, "on a /config root owns", notWritable)
 }
 
 // TestLogWaitEndsWhenStopped holds the suite's own helper, not anything
@@ -50,7 +50,7 @@ func TestLogWaitEndsWhenStopped(t *testing.T) {
 	ctx := t.Context()
 	vol := configVolume(t, e)
 	prepare(t, e, image, asRoot, vol, "root-own")
-	c, err := e.Start(ctx, t, refusing(image, vol))
+	c, err := e.Start(ctx, t, refusing(e, image, vol))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,17 +76,19 @@ func TestExitsOnStartupFailure(t *testing.T) {
 	e, image := underTest(t)
 	vol := configVolume(t, e)
 	prepare(t, e, image, harness.Contract(tmpfsSize), vol, "mkdir", "sonarr.pid")
-	harness.Refuses(t, e, refusing(image, vol), nonRecoverableFailure, "with sonarr.pid a directory", pidUnwritable)
+	harness.Refuses(t, e, refusing(e, image, vol), nonRecoverableFailure, "with sonarr.pid a directory", pidUnwritable)
 }
 
 // refusing is a run of the image under the contract, with vol at /config
-// and no network, for a start Sonarr must refuse.
-func refusing(image string, vol harness.Mount) *harness.RunSpec {
+// and no network, for a start Sonarr must refuse, under engine e, which
+// keeps every line it logs.
+func refusing(e harness.Engine, image string, vol harness.Mount) *harness.RunSpec {
 	return &harness.RunSpec{
 		Image:   image,
 		Network: "none",
 		Confine: harness.Contract(tmpfsSize),
 		Mounts:  []harness.Mount{vol},
+		Extra:   engineLogs(e),
 	}
 }
 
@@ -112,6 +114,7 @@ func TestRefusesNoConfigMount(t *testing.T) {
 		Image:   image,
 		Network: "none",
 		Confine: harness.Contract(tmpfsSize),
+		Extra:   engineLogs(e),
 	})
 	if err != nil {
 		t.Fatal(err)

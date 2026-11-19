@@ -498,7 +498,11 @@ step needs the user's go-ahead:
   tests, or two suites on one host, ask for the same one. The assertions
   (`StatusIs`, `Answers`, `Refuses` and the rest) are the harness's too,
   shared with every divbast image, and every wait is `harness.Poll`. Each
-  thing the image serves or guarantees has a test
+  thing the image serves or guarantees has a test. Under Podman every
+  container gets `--log-driver k8s-file`: Podman's default under systemd,
+  journald, drops a unit's messages past its rate limit, and Sonarr's first
+  start logs every migration, so a suite run lost the very lines its tests
+  wait for
 - **Go is modern and idiomatic, and linted strictly**, under ci's
   `go/golangci.yml`. Bash is for what is short and will stay so: the
   justfile's recipes. A check that runs inside a Containerfile build stage
