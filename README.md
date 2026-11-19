@@ -277,7 +277,13 @@ upstream ships it:
 - Then whatever indexers, download clients, lists and connections you
   configure.
 
-None of it is needed to serve or to be healthy.
+None of it is needed to serve or to be healthy. One thing does change
+with no route out, once the image is more than 14 days older than the
+Sonarr release it was built from, as a published image soon is: Sonarr
+then checks for an update with every round of its health checks, the
+check fails, and the round shows nothing, so the UI's System, Status page
+is empty rather than listing the warnings it would. The probe stays
+healthy; give Sonarr a route to `services.sonarr.tv` to see the page.
 
 ## Not supported
 

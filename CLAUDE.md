@@ -338,21 +338,28 @@ step needs the user's go-ahead:
    - `renovate.json`: the first manager follows stable releases alone, as
      prowlarr-oci-image's does (drop `ignoreUnstable: false` from its rule,
      and say so in its description); delete the stable watch's manager and
-     its rule, and the group's `separateMajorMinor` and the description
-     that explains them;
+     its rule; drop `Sonarr v5 stable` from the group's `matchDepNames`,
+     and the group's `separateMajorMinor` and the description that
+     explains them;
    - the Containerfile: `SONARR_VERSION` and `SONARR_COMMIT` to the
      release picked and the commit its tag names; delete the
      `# SONARR_STABLE_V5=` line and its comment;
      `-p:AssemblyConfiguration=main` and `Branch=main`, upstream's names
      for stable builds; the comments that say develop;
    - delete `test/stable`;
-   - `test/acceptance`: `developBranch`, and `branchChanged`, to `main`;
+   - `test/acceptance`: `developBranch` becomes `main`. `TestMigratedConfig`
+     then needs a `config.xml` on another branch for Sonarr to change:
+     `migratedConfig`'s `<Branch>` becomes `develop`, as a `config.xml`
+     this image wrote before the move says, and `branchChanged` becomes
+     `External updater uses branch main instead of the currently selected
+     develop, changing to main.`, the line Sonarr then logs;
    - `build.yml`'s `description`, this file, the README and divbast/.github's
      profile row: drop "beta" and "develop", and this section.
 
    Open the PR, and merge it when green.
-4. Close Renovate's red PR, and mark Sonarr's phase 7 done in the Servarr
-   programme's records.
+4. Close Renovate's red PR if it is still open (Renovate usually closes
+   it, or rebases it onto the new main, on its next run), and mark
+   Sonarr's phase 7 done in the Servarr programme's records.
 
 ## Where the shared parts live
 
