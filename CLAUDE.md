@@ -13,9 +13,7 @@ its Servarr parts follow prowlarr-oci-image's. The divbast organisation's
 settings, rulesets and Renovate wiring live in `divbast/infra`.
 
 It publishes to `ghcr.io/divbast/sonarr`, tagged with Sonarr's version
-and `latest`, from `build.yml`'s daily slot and its manual run on `main`,
-once its publish switch is on: until then the publish job keeps the
-template's `rehearse: true`, and fails by design.
+and `latest`, from `build.yml`'s daily slot and its manual run on `main`.
 
 What makes the image this app's lives here: the Containerfile, the health
 probe (`cmd/divbast-sonarr`, `internal/probe`), the backend stage's two
@@ -180,6 +178,10 @@ breaking change.
   of `build` publishes at once. `.github/workflows/stall.yml`, through
   divbast/ci's `stall.yml`, fails each day that updates have stopped
   flowing: a Renovate PR stuck, or Renovate silent
+- **The publish job publishes for real.** `build.yml` calls
+  `app-publish.yml` with `image: ghcr.io/divbast/sonarr` and no
+  `rehearse`, an input divbast/ci permits only in the template. It tags the
+  attested index with `SONARR_VERSION` and `latest`
 - **Every image the Containerfile builds from is verified first.** Before
   `app-check.yml` builds anything, `divbast-verify-images` refuses any image
   not pinned as `<name>:<tag>@sha256:<digest>`, and verifies Docker's

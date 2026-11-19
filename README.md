@@ -66,10 +66,14 @@ of the same major and minor can build it; that file does not ship.
 
 ## Running
 
-There is no published image yet, so build one first: `docker login
-dhi.io`, since every image the build starts from is Docker Hardened, then
-`just setup`, then `ENGINE=podman just build`, which tags it
-`localhost/sonarr:dev`.
+Pull `ghcr.io/divbast/sonarr:latest`, which follows Sonarr's v5 develop
+releases until v5 stable, as [The develop line](#the-develop-line) says; a
+version tag, `:<version>` with the Sonarr release in place of `<version>`,
+pins one. The package page on ghcr.io lists the tags. To build it
+yourself: `docker login dhi.io`, since every image the build starts from
+is Docker Hardened, then `just setup`, then `ENGINE=podman just build`,
+which tags it `localhost/sonarr:dev`. Substitute that tag for
+`ghcr.io/divbast/sonarr:latest` in the command below.
 
 ```bash
 podman run -d --name sonarr \
@@ -81,7 +85,7 @@ podman run -d --name sonarr \
   -v /srv/data:/data \
   -p 127.0.0.1:8080:8080 \
   --health-cmd '["/usr/local/bin/divbast-sonarr","health"]' \
-  localhost/sonarr:dev
+  ghcr.io/divbast/sonarr:latest
 ```
 
 `--read-only-tmpfs=false` and `--health-cmd` are Podman's alone. Without
@@ -394,15 +398,12 @@ A merge never publishes. The daily slot publishes `main` when `main` moved
 since the commit the published `:latest` was built from, and the button, a
 manual run of `build` from `main`, publishes at once.
 
-Until the first image is published, the publish job keeps the template's
-`rehearse: true`, which divbast/ci permits only in the template, so each
-daily slot's publish job fails by design. Once it is switched, it calls
-divbast/ci's `app-publish.yml` with `image: ghcr.io/divbast/sonarr`: a
-publish pushes an index of the amd64 and arm64 images, attests it,
-verifies the attestation, and only then tags it twice, with Sonarr's
-version, the Containerfile's `SONARR_VERSION`, and with `latest`. It ends
-by checking, as an anonymous client, that both tags are the attested
-index.
+Its publish job calls divbast/ci's `app-publish.yml` with `image:
+ghcr.io/divbast/sonarr`. A publish pushes an index of the amd64 and arm64
+images, attests it, verifies the attestation, and only then tags it twice:
+with Sonarr's version, the Containerfile's `SONARR_VERSION`, and with
+`latest`. It ends by checking, as an anonymous client, that both tags are
+the attested index.
 
 ## Dependency updates
 
