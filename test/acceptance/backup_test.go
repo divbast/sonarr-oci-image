@@ -162,9 +162,13 @@ func TestRestoresBackup(t *testing.T) {
 	}
 	resp, err := api(ctx, s, http.MethodDelete, "/api/v5/tag/"+strconv.Itoa(made.ID), nil)
 	checks.True("DELETE /api/v5/tag/<its id> succeeds", err == nil && resp.Status < 300, fmt.Sprintf("%v %d", err, resp.Status))
-	if labels(t, s, "after the delete") == nil {
+	// Without the tag gone, the restore below would have nothing to bring
+	// back, and the check after it would pass whatever the restore did
+	gone := labels(t, s, "after the delete")
+	if gone == nil {
 		return
 	}
+	checks.True("after the delete, the tag is gone", !slices.Contains(gone, "restored"), fmt.Sprintf("tags: %q", gone))
 
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
