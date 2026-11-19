@@ -2,9 +2,9 @@
 # SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
 
 # The daily stall check, through divbast/ci's stall.yml: a Renovate pull
-# request that never goes green or never finishes, or Renovate itself
-# silent. A scheduled run's failure goes to whoever last edited the cron
-# line below.
+# request that never goes green or never finishes, Renovate itself silent,
+# or daily slots that should have published and did not. A scheduled run's
+# failure goes to whoever last edited the cron line below.
 
 name: stall
 
@@ -28,12 +28,7 @@ jobs:
     name: stall
     uses: divbast/ci/.github/workflows/stall.yml@a08d1656cd1a4d91cb97290e61b1c3fa31a28d7e # v3.16.0
     with:
-      # No slots: they count the slots that should have published, and this
-      # repository publishes nothing to ghcr.io. An app turns them on once
-      # its first image is public: README.md's "Making a new app", step 8.
-      checks: '["open","stuck","renovate"]'
-    # Everything stall.yml's job asks for, slots or not: a called job that
-    # asks for more than its caller grants fails.
+      published: ghcr.io/divbast/sonarr:latest
     permissions:
       contents: read # read main, compare commits, the repository's age
       pull-requests: read # list Renovate's pull requests
