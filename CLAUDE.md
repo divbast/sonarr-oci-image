@@ -177,11 +177,14 @@ breaking change.
   publishing slot, through divbast/ci's `app-publish.yml`, and a manual run
   of `build` publishes at once. `.github/workflows/stall.yml`, through
   divbast/ci's `stall.yml`, fails each day that updates have stopped
-  flowing: a Renovate PR stuck, or Renovate silent
+  flowing: a Renovate PR stuck, Renovate silent, or a daily slot that
+  should have published and did not
 - **The publish job publishes for real.** `build.yml` calls
   `app-publish.yml` with `image: ghcr.io/divbast/sonarr` and no
   `rehearse`, an input divbast/ci permits only in the template. It tags the
-  attested index with `SONARR_VERSION` and `latest`
+  attested index with `SONARR_VERSION` and `latest`. `stall.yml` passes
+  `published: ghcr.io/divbast/sonarr:latest`, so its slots check is on: it
+  counts the daily slots that should have published and did not
 - **Every image the Containerfile builds from is verified first.** Before
   `app-check.yml` builds anything, `divbast-verify-images` refuses any image
   not pinned as `<name>:<tag>@sha256:<digest>`, and verifies Docker's
