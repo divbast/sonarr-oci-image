@@ -147,8 +147,19 @@ const testPassword = "divbast-acceptance-only-0123" //nolint:gosec // G101: a ma
 // it, takes the UI's session and not the API key.
 func serveSignedIn(t *testing.T, e harness.Engine, image string) *harness.Serving {
 	t.Helper()
-	return serveSonarr(t, e, image, pingPath, keyed(map[string]string{"SONARR__AUTH__INITIALPASSWORD": testPassword}), configVolume(t, e))
+	s := serveSonarr(t, e, image, pingPath, keyed(map[string]string{"SONARR__AUTH__INITIALPASSWORD": testPassword}), configVolume(t, e))
+	// Sonarr makes the first user once its host has started, just after it
+	// first answers /ping, so a sign-in sent at once can come before there
+	// is anyone to sign in as: wait for it to say the user exists
+	if err := logged(t.Context(), s.C, userCreated, harness.ServeWithin); err != nil {
+		t.Fatalf("Sonarr never made its first user: %v", err)
+	}
+	return s
 }
+
+// userCreated is what Sonarr logs once it has made the first user with
+// the password SONARR__AUTH__INITIALPASSWORD gives.
+const userCreated = "created 'sonarr' with the configured password"
 
 // signIn signs in to s's UI as the user sonarr with testPassword, as the
 // login page posts its form, and returns the session cookie Sonarr sets,
