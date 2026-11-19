@@ -249,9 +249,11 @@ breaking change.
 - **The frontend runs no install script.** `yarn install
   --frozen-lockfile --ignore-scripts`: Sonarr's own package.json has none,
   the Vite build needs none, and an install script is how most malicious
-  npm releases have run. If an upstream bump makes the build need one, the
-  build fails, and the fix is to name why in the Containerfile, not to
-  drop the flag quietly
+  npm releases have run. A dependency's script the build cannot do
+  without would fail it, but an install script upstream adds to its own
+  package.json would be skipped without a word, and the UI built without
+  whatever it did: read a Sonarr bump's package.json changes for one. The
+  fix is to name why in the Containerfile, not to drop the flag quietly
 - **ffprobe gets its execute bit back.** NuGet extracts it without one, as
   upstream's packaging finds too; the backend stage `chmod`s it and asserts
   it is executable, and `TestFFprobeRuns` runs it

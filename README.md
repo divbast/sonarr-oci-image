@@ -441,9 +441,10 @@ Renovate opens here are:
 - The toolchain in `mise.toml` moves by pull requests of its own.
 
 Renovate merges its own pull requests once every check on one has passed,
-while the repository variable `SONARR_AUTOMERGE` is `enabled`. Two more
+while the repository variable `SONARR_AUTOMERGE` is `enabled`. Three
 kinds first wait for someone to approve them on the Dependency Dashboard:
-a new major version of divbast/ci, and a raise of `go.mod`'s `go` line.
+a new .NET major, a new major version of divbast/ci, and a raise of
+`go.mod`'s `go` line.
 Any other value of the variable, or none, stops merging from the next run,
 and Renovate goes on opening and rebasing pull requests for a person to
 merge:

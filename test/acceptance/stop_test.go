@@ -13,8 +13,8 @@ import (
 
 // stopWithin is how long a stop may take, with Sonarr's own hosts refused
 // and analytics off, as serveSonarr runs every container. Once its host
-// had started, Sonarr stopped in 0.19 to 0.22 s on its own and 0.24 to
-// 0.35 s within this suite. Prowlarr, on the same .NET host and the same
+// had started, Sonarr stopped in 0.19 to 0.22 s on its own and 0.35 to
+// 0.58 s within this suite. Prowlarr, on the same .NET host and the same
 // shutdown, took 0.60 to 2.81 s with three suites running at once on one
 // host, as on a busy CI runner, and its budget, 2.81 s and half again
 // rounded up to 4.3 s, holds here too: well inside the 10 s after which an

@@ -199,7 +199,7 @@ COPY --from=probe /out/divbast-sonarr /usr/local/bin/divbast-sonarr
 # The data directory, empty and uid 65532's, and not a VOLUME: a new named
 # volume mounted here takes its owner from it, so Sonarr can write to it.
 # Without a mount, the read-only root refuses every write, and Sonarr
-# stops at once.
+# exits 3, naming /config, though only after about two minutes.
 COPY --from=backend --chown=65532:65532 /out/config /config
 # Sonarr takes ASP.NET Core's content root from its working directory, and
 # sets none of its own. It loads no appsettings.json and watches no file,
