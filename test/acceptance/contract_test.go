@@ -25,9 +25,9 @@ const (
 // contract's Exec run.
 const binary = "/usr/local/bin/divbast-sonarr"
 
-// serverArgv is PID 1's argv: the image's ENTRYPOINT, the apphost alone,
-// since nothing runs before it.
-var serverArgv = []string{"/app/bin/Template"}
+// serverArgv is PID 1's argv: the image's ENTRYPOINT, since nothing runs
+// before Sonarr.
+var serverArgv = []string{"/app/bin/Sonarr", "-nobrowser", "-exitimmediately", "-data=/config"}
 
 // healthCmd is the shipped health probe, as the image's HEALTHCHECK runs
 // it and a Podman user passes it with --health-cmd.

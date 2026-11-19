@@ -3,10 +3,6 @@
 
 .ci/
 vendor/
-# A local dotnet build's output, which a .NET app's COPY src/ would
-# otherwise carry into its build stage
-src/**/bin
-src/**/obj
 .agents/
 .superpowers/
 .git/
