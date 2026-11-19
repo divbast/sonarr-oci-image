@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-License-Identifier: GPL-3.0-only
 # SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
 
 # divbast/ci, checked out by `just setup` at the commit the workflows pin
@@ -6,7 +6,3 @@
 .agents/
 .superpowers/
 vendor/
-# A local dotnet build's output, beside the .NET layer's source, before
-# and after step 0 moves it
-**/src/**/bin/
-**/src/**/obj/

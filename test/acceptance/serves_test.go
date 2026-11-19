@@ -1,58 +1,66 @@
-// SPDX-License-Identifier: BSD-2-Clause
+// SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Aryan Ameri <github@aryan.ameri.coffee>
 
 package acceptance
 
 import (
+	"mime"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/divbast/ci/harness"
 )
 
-// page is exactly what GET / answers.
-const page = "Hello from oci-image-template"
+// pingBody is exactly what /ping answers once Sonarr is up: upstream's
+// JSON, compact, as it sends it.
+const pingBody = `{"status":"OK"}`
 
-// refused are paths the app port must answer with a 404 and an empty
-// body: a PHP app's script by its own name, /healthz, which only the
-// health port serves, and a path nothing names.
-var refused = []string{"/index.php", "/healthz", "/nope"}
+// loginTitle is the title of the UI's login page, which only the UI the
+// frontend stage built carries, and which Sonarr serves to anyone.
+const loginTitle = "<title>Login - Sonarr</title>"
 
-// TestServes checks the app port, from a client outside the container,
-// through the published port: GET / answers 200 with exactly the page, and
-// every other path a 404 with an empty body, because 8080 is an
-// allowlist.
+// TestServes checks the app port from a client outside the container,
+// through the published port, with no session and no API key, as a fresh
+// install meets a visitor: /ping answers 200 with exactly upstream's body;
+// / sends a visitor with no session to the login page, since Sonarr asks
+// for a login from the start; the login page answers 200 with the UI's
+// HTML; and the API refuses a client without the key with 401.
 func TestServes(t *testing.T) {
 	t.Parallel()
 	e, image := underTest(t)
 	ctx := t.Context()
-
-	s, err := e.Serve(ctx, t, &harness.ServeSpec{
-		Run: harness.RunSpec{
-			Image:   image,
-			Confine: harness.Contract(tmpfsSize),
-		},
-		AppPort: appPort,
-	})
+	s := serveFresh(t, e, image)
 	checks := harness.NewChecks(t)
-	if err != nil {
-		checks.True("GET / from the host gets an answer", false, err.Error())
-		return
-	}
 
-	resp, err := s.Get(ctx, "/", nil)
-	harness.Answers(t, "GET / from the host answers 200", http.StatusOK, resp, err)
+	resp, err := s.Get(ctx, pingPath, nil)
+	harness.Answers(t, "GET /ping from the host answers 200", http.StatusOK, resp, err)
 	if err == nil {
-		harness.Equal(checks, "GET / from the host is exactly the page", page, string(resp.Body))
+		harness.Equal(checks, "GET /ping from the host is exactly upstream's body", pingBody, string(resp.Body))
 	}
 
-	for _, path := range refused {
-		what := "GET " + path + " from the host"
-		resp, err = s.Get(ctx, path, nil)
-		harness.Answers(t, what+" answers 404", http.StatusNotFound, resp, err)
-		if err != nil {
-			continue
+	resp, err = s.Get(ctx, "/", nil)
+	harness.Answers(t, "GET / from the host with no session answers 302", http.StatusFound, resp, err)
+	if err == nil {
+		where, perr := url.Parse(resp.Header.Get("Location"))
+		got := ""
+		if perr == nil {
+			got = where.Path
 		}
-		harness.Equal(checks, what+" has an empty body", "", string(resp.Body))
+		harness.Equal(checks, "GET / from the host with no session goes to the login page", "/login", got)
 	}
+
+	resp, err = s.Get(ctx, "/login", nil)
+	harness.Answers(t, "GET /login from the host answers 200", http.StatusOK, resp, err)
+	if err == nil {
+		media, _, merr := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+		if merr != nil {
+			media = merr.Error()
+		}
+		harness.Equal(checks, "GET /login from the host is HTML", "text/html", media)
+		harness.Contains(t, "GET /login from the host is the UI's login page", loginTitle, string(resp.Body))
+	}
+
+	harness.StatusIs(t, s, "GET /api/v5/system/status from the host without the API key answers 401",
+		http.StatusUnauthorized, "/api/v5/system/status")
 }

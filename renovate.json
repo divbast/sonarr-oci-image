@@ -1,4 +1,75 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>divbast/renovate-config", "github>divbast/renovate-config:app"]
+  "extends": [
+    "github>divbast/renovate-config",
+    "github>divbast/renovate-config:app"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "ARG SONARR_VERSION and the ARG SONARR_COMMIT beneath it, captured together so one PR moves both. The dockerfile manager only reads an ARG that a FROM expands, and these feed the fetch stage's checkout. The image follows Sonarr's v5 develop line, each build of which upstream publishes as a GitHub pre-release, so the rule below lets pre-releases through. github-releases lists releases alone, and so offers only builds upstream released; github-tags would also offer Radarr's tags, v5.28 and v6 among them, which Sonarr's repository holds and which outrank Sonarr's own. Its digest is the commit the release's tag names, which the fetch stage checks out and asserts the tag still names. github-releases looks that commit up by the tag's own name, v5.0.0.2997. So currentValueTemplate adds the v to the version Renovate compares, and autoReplaceStringTemplate takes it off again when it writes the ARG back. Stripping the v with extractVersion instead would leave Renovate looking for a tag named 5.0.0.2997, which does not exist, and it would drop the update. The versioning compares all four numbers, which semver cannot read. The two ARGs must stay adjacent and in this order.",
+      "managerFilePatterns": [
+        "/^Containerfile$/"
+      ],
+      "matchStrings": [
+        "ARG SONARR_VERSION=(?<currentValue>\\S+)\\nARG SONARR_COMMIT=(?<currentDigest>[0-9a-f]{40})"
+      ],
+      "depNameTemplate": "Sonarr/Sonarr",
+      "datasourceTemplate": "github-releases",
+      "currentValueTemplate": "v{{{currentValue}}}",
+      "versioningTemplate": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)$",
+      "autoReplaceStringTemplate": "ARG SONARR_VERSION={{{replace '^v' '' newValue}}}\nARG SONARR_COMMIT={{{newDigest}}}"
+    },
+    {
+      "customType": "regex",
+      "description": "The watch for Sonarr's first stable v5 release: the Containerfile's '# SONARR_STABLE_V5=' line, which no build reads. It sits in the Containerfile because the recommended preset ignores every path under test/. It is the same repository's GitHub releases under another name, offered only those GitHub calls stable and whose version is 5 (the rule below), so nothing moves it until upstream publishes v5 stable; then test/stable's TestNoV5StableYet fails its pull request with the steps in CLAUDE.md, 'Moving to stable'. Its floor, 0.0.0.0, shares no major, minor and patch with any release: Renovate offers a pre-release that shares all three with the current version, and every v5 develop build is 5.0.0.N. The v is added and taken off as for the develop line, with the same versioning.",
+      "managerFilePatterns": [
+        "/^Containerfile$/"
+      ],
+      "matchStrings": [
+        "# SONARR_STABLE_V5=(?<currentValue>[0-9.]+)"
+      ],
+      "depNameTemplate": "Sonarr v5 stable",
+      "packageNameTemplate": "Sonarr/Sonarr",
+      "datasourceTemplate": "github-releases",
+      "currentValueTemplate": "v{{{currentValue}}}",
+      "versioningTemplate": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)$",
+      "autoReplaceStringTemplate": "# SONARR_STABLE_V5={{{replace '^v' '' newValue}}}"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "The develop line's pins and the stable watch share one group, and so one branch and one pull request. Until upstream publishes v5 stable, the group holds the develop release alone and merges as every update here does. From then on every develop release lands in the watch's pull request, which its check holds red, so the image stays on the develop build it has, which the stable release carries, until it moves to stable by hand: CLAUDE.md, 'Moving to stable'. The watch's first update is a major one, from its floor, and Renovate would give a major a branch of its own: separateMajorMinor keeps it in the group's.",
+      "matchDepNames": [
+        "Sonarr/Sonarr",
+        "Sonarr v5 stable"
+      ],
+      "groupName": "Sonarr",
+      "labels": [
+        "sonarr"
+      ],
+      "commitMessagePrefix": "sonarr:",
+      "separateMajorMinor": false
+    },
+    {
+      "description": "Sonarr's v5 develop releases, every one a GitHub pre-release, merge once every check passes, like every other update here: the acceptance suite, not the kind of release, is what holds one back.",
+      "matchDepNames": [
+        "Sonarr/Sonarr"
+      ],
+      "ignoreUnstable": false,
+      "automerge": true
+    },
+    {
+      "description": "The stable watch is offered only releases GitHub calls stable, of v5 alone, so neither a develop build nor a v4 maintenance release moves it, and it never merges itself: moving to stable is done by hand.",
+      "matchDepNames": [
+        "Sonarr v5 stable"
+      ],
+      "ignoreUnstable": true,
+      "allowedVersions": "/^v5\\./",
+      "automerge": false,
+      "prBodyNotes": [
+        "Sonarr has published a stable v5 release, so this pull request stays red, and the develop line stops here: move the image to stable as CLAUDE.md's 'Moving to stable' says."
+      ]
+    }
+  ]
 }
