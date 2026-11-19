@@ -39,7 +39,7 @@ concurrency:
 jobs:
   check:
     name: check
-    uses: divbast/ci/.github/workflows/app-check.yml@bde821963cf2fb32e1ca67337e5b84ae1114ac1a # v3.12.0
+    uses: divbast/ci/.github/workflows/app-check.yml@a08d1656cd1a4d91cb97290e61b1c3fa31a28d7e # v3.16.0
     with:
       # The DHI login, without which dhi.io answers nothing: the lint and
       # the build log in with it to read a Containerfile's Docker Hardened
@@ -83,7 +83,7 @@ jobs:
     if: >-
       github.ref == 'refs/heads/main'
       && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-    uses: divbast/ci/.github/workflows/app-publish.yml@bde821963cf2fb32e1ca67337e5b84ae1114ac1a # v3.12.0
+    uses: divbast/ci/.github/workflows/app-publish.yml@a08d1656cd1a4d91cb97290e61b1c3fa31a28d7e # v3.16.0
     with:
       image: ghcr.io/divbast/oci-image-template
       version-arg: SONARR_VERSION
