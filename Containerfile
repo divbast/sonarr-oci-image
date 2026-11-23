@@ -9,8 +9,8 @@
 # assemblies carry it, and the probe compares it with the version Sonarr
 # reports. The fetch stage checks out the commit and asserts the release's
 # tag still names it.
-ARG SONARR_VERSION=5.0.0.2997
-ARG SONARR_COMMIT=51a2412af235197ce15d7d4a17c053a8e2c26609
+ARG SONARR_VERSION=5.0.0.3041
+ARG SONARR_COMMIT=03f822c78293981e6e1459fbce59d11476b2107f
 # The watch for Sonarr's first stable v5 release, which no build reads:
 # Renovate writes it on the line below once GitHub has a v5 release that is
 # not a pre-release, and test/stable's TestNoV5StableYet then fails, so the
