@@ -22,7 +22,7 @@ ARG SONARR_COMMIT=03f822c78293981e6e1459fbce59d11476b2107f
 # manager, and its nonroot user 65532. The app is built framework-dependent,
 # so a rebuild of this image patches the runtime. CI verifies its signature
 # by Docker before anything is built, as it does every stage's image below.
-ARG RUNTIME_IMAGE=dhi.io/aspnetcore:10.0.15-debian13@sha256:eb133a7e0d3451d528b451326b538460466bfdc6b86cc274a2e290f4ef128d92
+ARG RUNTIME_IMAGE=dhi.io/aspnetcore:10.0.15-debian13@sha256:b1b32dadf1d9ecd91f307ea059dfc457478495de45d00e8de99993d154cc8879
 
 # The same image as the frontend's, which ships git and CA certificates.
 FROM dhi.io/node:26.13.1-debian13-dev@sha256:f93de13abcc8050541e2787a7ef71e776e197545b66f3479d57fbfc2c937609f AS fetch
