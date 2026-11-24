@@ -72,7 +72,7 @@ RUN yarn install --frozen-lockfile --ignore-scripts --network-timeout 120000 \
     && yarn build
 
 # The backend, framework-dependent for this stage's own architecture.
-FROM dhi.io/dotnet:10.0.404-sdk-debian13@sha256:fbeb40422cdfd44339fb5fe953828668182d4f2c79920cb0fb0082642c869e43 AS backend
+FROM dhi.io/dotnet:10.0.404-sdk-debian13@sha256:711001f2c5bef9b6ce3d6d66847e5c81348b623ff05f515169c0007d11394230 AS backend
 ARG SONARR_VERSION
 ARG TARGETARCH
 # Upstream keeps no lock file, and pins every package by an exact version
