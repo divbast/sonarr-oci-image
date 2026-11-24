@@ -25,7 +25,7 @@ ARG SONARR_COMMIT=03f822c78293981e6e1459fbce59d11476b2107f
 ARG RUNTIME_IMAGE=dhi.io/aspnetcore:10.0.15-debian13@sha256:b1b32dadf1d9ecd91f307ea059dfc457478495de45d00e8de99993d154cc8879
 
 # The same image as the frontend's, which ships git and CA certificates.
-FROM dhi.io/node:26.13.1-debian13-dev@sha256:f93de13abcc8050541e2787a7ef71e776e197545b66f3479d57fbfc2c937609f AS fetch
+FROM dhi.io/node:26.13.1-debian13-dev@sha256:dc9c579c8666127214312d953f456924bc1c57d4c0c367c40532fe6ef01d831b AS fetch
 ARG SONARR_VERSION
 ARG SONARR_COMMIT
 # git checks a fetch by commit against its hash. The tag is asked for
@@ -65,7 +65,7 @@ RUN set -eux; \
 # yarn.lock through upstream has one way fewer to act. NODE_ENV stays unset
 # for the install, where production would skip the devDependencies Vite is
 # among; vite build sets it for the build.
-FROM dhi.io/node:26.13.1-debian13-dev@sha256:f93de13abcc8050541e2787a7ef71e776e197545b66f3479d57fbfc2c937609f AS frontend
+FROM dhi.io/node:26.13.1-debian13-dev@sha256:dc9c579c8666127214312d953f456924bc1c57d4c0c367c40532fe6ef01d831b AS frontend
 WORKDIR /src
 COPY --from=fetch /src ./
 RUN yarn install --frozen-lockfile --ignore-scripts --network-timeout 120000 \
