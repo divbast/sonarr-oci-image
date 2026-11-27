@@ -143,8 +143,18 @@ install's Settings, System, Backup, until you are sure.
 Copy the old `/config` into the new volume or directory, then give it all
 to 65532 as above, with `chown -R`: the files another image wrote are
 usually its PUID's, such as 1000. Or start fresh, sign in, and restore the
-backup under System, Backup; the restore applies when Sonarr restarts,
-which it does in the same container.
+backup under System, Backup; Sonarr restarts itself, in the same
+container, to apply it.
+
+**After restoring a backup, restart the container** (`podman restart
+sonarr`) before you change anything, whether it is still running or has
+stopped. Sonarr's own restart puts the restored database in place, but
+upstream leaves SQLite's connections open across that restart. So Sonarr
+can go on reading, and writing, the database the restore replaced: the
+restore looks undone, and whatever you change before a full restart is
+lost. Or it can stop partway through the restore, exit status 3, with
+`Failed to restore database` in its log, the restore not yet applied. A
+restart of the container applies the restore whatever was left open.
 
 - This image serves on 8080, not Sonarr's usual 8989, and its
   `SONARR__SERVER__PORT` wins over the old `config.xml`. Whatever reaches

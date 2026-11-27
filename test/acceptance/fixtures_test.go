@@ -296,14 +296,28 @@ type systemStatus struct {
 	Branch                 string `json:"branch"`
 }
 
+// container is what logged reads of one: its log, and whether it still
+// runs. A *harness.Container is one, and logged's own test gives it
+// another, whose answers it scripts.
+type container interface {
+	Logs(ctx context.Context) (string, error)
+	Inspect(ctx context.Context) (harness.Inspect, error)
+}
+
 // logged reads c's log every 250 ms until it holds needle, and returns an
-// error, with the log, once within has passed, or at once if c stops or
-// the engine fails to answer.
-func logged(ctx context.Context, c *harness.Container, needle string, within time.Duration) error { //nolint:unparam // each caller's own budget, which harness.ServeWithin and restartWithin each happen to set at a minute today
+// error, with the log, once within has passed, or at once if c stops
+// without it or the engine fails to answer. A container found stopped has
+// its log read once more first: it may have logged needle and stopped
+// between the two looks, as Sonarr exits a second after it logs a failed
+// restore, and a stopped container's log is all it will ever say.
+func logged(ctx context.Context, c container, needle string, within time.Duration) error { //nolint:unparam // each caller's own budget, which harness.ServeWithin and restartWithin each happen to set at a minute today
 	// What each look short of needle, c still running, returns: only
 	// these does Poll look again after, and when it stops on one, the
 	// error needs c's log
 	waiting := fmt.Errorf("its log does not say %q", needle)
+	// The log as the last look read it, for the error once within passes.
+	// Poll calls each try in this goroutine, so no lock guards it
+	var last string
 	// The engine is asked with ctx rather than the try's own, which the
 	// budget ends: a call it cut short would come back as the engine's
 	// error, returned at once, in place of the budget's
@@ -315,19 +329,35 @@ func logged(ctx context.Context, c *harness.Container, needle string, within tim
 		if strings.Contains(logs, needle) {
 			return nil
 		}
+		last = logs
 		ins, err := c.Inspect(ctx)
 		switch {
 		case err != nil:
 			return err
-		case !ins.State.Running:
-			return harness.WithLog(ctx, c, fmt.Errorf("the container stopped, exit status %d, before its log said %q", ins.State.ExitCode, needle))
+		case ins.State.Running:
+			return harness.NotYet(waiting)
 		}
-		return harness.NotYet(waiting)
+		if logs, err = c.Logs(ctx); err != nil {
+			return err
+		}
+		if strings.Contains(logs, needle) {
+			return nil
+		}
+		return withLog(fmt.Errorf("the container stopped, exit status %d, before its log said %q", ins.State.ExitCode, needle), logs)
 	})
 	if errors.Is(err, waiting) {
-		return harness.WithLog(ctx, c, err)
+		return withLog(err, last)
 	}
 	return err
+}
+
+// withLog returns err with logs, a container's log logged has read,
+// added, as harness.WithLog adds one it reads itself.
+func withLog(err error, logs string) error {
+	if logs = strings.TrimSpace(logs); logs == "" {
+		return fmt.Errorf("%w; its log is empty", err)
+	}
+	return fmt.Errorf("%w; its log:\n%s", err, logs)
 }
 
 // errText is err's text, or "ok" for none, for a check's detail.

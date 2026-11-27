@@ -132,6 +132,22 @@ breaking change.
   database needs (a 50-tag backup fitted 1 MiB), and `TestBackupFitsTmpfs`
   and `TestRestoresBackup` hold it; the README tells users how to size
   theirs
+- **A restore needs a restart of the container.** The restore's upload
+  stages the database as `/config/sonarr.restore`, and Sonarr's in-process
+  restart puts it in place (`Restoring Database`), but upstream clears
+  SQLite's connection pool only after a backup (`MakeDatabaseBackup`),
+  never between in-process restarts, so a connection the old host left
+  open races the restore. Closing, it takes `sonarr.db-wal` away between
+  the restore's check for the file and its move of it, and Sonarr logs
+  `Failed to restore database` and exits 3, the restore still staged;
+  still open, it hands the new host the replaced `sonarr.db`, and the old
+  data. On GitHub's amd64 runners the old data showed under both engines,
+  and the exit under Docker. `TestRestoresBackup` therefore restarts the
+  container once Sonarr logs that it is restoring, whether the container
+  still runs or has stopped, logging which way the in-process restart
+  went, before it looks for the restored tag, and the README tells users
+  to do the same, before changing anything. Upstream's own fix would be a
+  `ClearAllPools` in its restart loop; this image does not patch it
 - **No egress is needed, and some happens.** The contract suite proves the
   image serves and is healthy on a genuinely `--internal` network. The
   acceptance suite points Sonarr's own hosts at loopback and turns

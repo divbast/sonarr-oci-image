@@ -4,7 +4,9 @@
 package acceptance
 
 import (
+	"context"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +61,74 @@ func TestLogWaitEndsWhenStopped(t *testing.T) {
 	harness.NewChecks(t).True("logged returns the stopped container's error at once, not its budget's",
 		err != nil && strings.Contains(text, "the container stopped") && !strings.Contains(text, "still failing after"),
 		harness.Clip(text))
+}
+
+// TestLogWaitRereadsAStoppedLog holds logged, the suite's own helper, on
+// a container whose answers it scripts, so it needs no image: a container
+// found stopped has its log read once more before logged reports that the
+// line never came. A container can log the line and stop between the
+// look at its log and the look at its state, as Sonarr does a second
+// after it logs a failed restore, and the line is then in its log for
+// good. One that stopped without the line is still the stopped
+// container's error, given at once with its log, not the budget's.
+func TestLogWaitRereadsAStoppedLog(t *testing.T) {
+	t.Parallel()
+	const needle = "Restoring Database"
+	tests := []struct {
+		name string
+		// logs is what each read of the log returns, the last again
+		// once they run out
+		logs      []string
+		wantReads int
+		wantErr   []string
+	}{
+		{
+			name:      "logged-then-stopped",
+			logs:      []string{"Restarting\n", "Restarting\nRestoring Database\n"},
+			wantReads: 2,
+		},
+		{
+			name:      "stopped-without-it",
+			logs:      []string{"Restarting\n"},
+			wantReads: 2,
+			wantErr:   []string{"the container stopped, exit status 3", "its log:\nRestarting"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := &stoppedContainer{logs: tt.logs}
+			err := logged(t.Context(), c, needle, harness.ServeWithin)
+			checks := harness.NewChecks(t)
+			if tt.wantErr == nil {
+				checks.True("logged finds the line in the stopped container's log", err == nil, errText(err))
+			}
+			for _, want := range tt.wantErr {
+				checks.True("logged's error says "+strconv.Quote(want), err != nil && strings.Contains(err.Error(), want), errText(err))
+			}
+			checks.True("logged returns at once, not at its budget's end",
+				err == nil || !strings.Contains(err.Error(), "still failing after"), errText(err))
+			harness.Equal(checks, "reads of the log", tt.wantReads, c.reads)
+		})
+	}
+}
+
+// stoppedContainer is a container that has stopped, exit status 3, for
+// logged: each read of its log returns the next of logs, and the last
+// again once they run out.
+type stoppedContainer struct {
+	logs  []string
+	reads int
+}
+
+func (c *stoppedContainer) Logs(context.Context) (string, error) {
+	logs := c.logs[min(c.reads, len(c.logs)-1)]
+	c.reads++
+	return logs, nil
+}
+
+func (c *stoppedContainer) Inspect(context.Context) (harness.Inspect, error) {
+	return harness.Inspect{State: harness.State{Status: "exited", ExitCode: nonRecoverableFailure}}, nil
 }
 
 // pidUnwritable is what Sonarr says when it cannot write its PID file.
