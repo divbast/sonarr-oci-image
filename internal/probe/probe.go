@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"strings"
 	"time"
@@ -108,18 +109,24 @@ func get(ctx context.Context, o Options, path, apiKey string, check func(body []
 // SONARR__SERVER__PORT (8080 if unset), then the URL base with a leading
 // / and no trailing /, or nothing. The URL base is
 // SONARR__SERVER__URLBASE if set, else the UrlBase in config.xml, which
-// configXML opens and the UI's Settings write, as Sonarr takes it. A
-// config.xml that cannot be read gives none, so a setup that sets
-// everything in the environment needs no config.xml.
-func Base(getenv func(string) string, configXML func() (io.ReadCloser, error)) string {
+// configXML gives as ReadConfig does and the UI's Settings write, as
+// Sonarr takes it. No config.xml gives none, so a setup that sets
+// everything in the environment needs no config.xml. A config.xml that
+// cannot be read or decoded is an error: guessing it has no URL base
+// would send the probe where Sonarr only redirects.
+func Base(getenv func(string) string, configXML func() ([]byte, error)) (string, error) {
 	port := getenv("SONARR__SERVER__PORT")
 	if port == "" {
 		port = "8080"
 	}
 	u := getenv("SONARR__SERVER__URLBASE")
 	if u == "" {
-		// Sonarr trims a config.xml value's white space as it reads it
-		if c, err := readConfig(configXML); err == nil {
+		c, err := readConfig(configXML)
+		if err != nil {
+			return "", fmt.Errorf("cannot tell the URL base: SONARR__SERVER__URLBASE is unset and %w", err)
+		}
+		if c != nil {
+			// Sonarr trims a config.xml value's white space as it reads it
 			u = strings.TrimSpace(c.URLBase)
 		}
 	}
@@ -127,19 +134,22 @@ func Base(getenv func(string) string, configXML func() (io.ReadCloser, error)) s
 	if u = strings.Trim(u, "/"); u != "" {
 		base = "/" + u
 	}
-	return "http://127.0.0.1:" + port + base
+	return "http://127.0.0.1:" + port + base, nil
 }
 
 // APIKey is SONARR__AUTH__APIKEY if set, else the ApiKey in config.xml,
-// which configXML opens, trimmed of white space as Sonarr trims it.
-// Neither is an error naming both.
-func APIKey(getenv func(string) string, configXML func() (io.ReadCloser, error)) (string, error) {
+// which configXML gives as ReadConfig does, trimmed of white space as
+// Sonarr trims it. Neither is an error naming both.
+func APIKey(getenv func(string) string, configXML func() ([]byte, error)) (string, error) {
 	if k := getenv("SONARR__AUTH__APIKEY"); k != "" {
 		return k, nil
 	}
 	c, err := readConfig(configXML)
 	if err != nil {
 		return "", fmt.Errorf("no API key: SONARR__AUTH__APIKEY is unset and %w", err)
+	}
+	if c == nil {
+		return "", errors.New("no API key: SONARR__AUTH__APIKEY is unset and there is no config.xml")
 	}
 	// Sonarr trims a config.xml value's white space as it reads it, and
 	// compares the key it is sent with what is left
@@ -150,25 +160,69 @@ func APIKey(getenv func(string) string, configXML func() (io.ReadCloser, error))
 	return k, nil
 }
 
+// configReads is how many times ReadConfig reads a config.xml that does
+// not decode, and configReadGap how long it waits between two reads. The
+// waits come to 160 ms at most, which the HEALTHCHECK's 2 s to spare over
+// the probe's own budget covers.
+const (
+	configReads   = 5
+	configReadGap = 40 * time.Millisecond
+)
+
+// ReadConfig returns config.xml as read gives it, once it decodes.
+// Sonarr rewrites config.xml in place as it starts, truncating it and
+// then writing it, so a read in between finds it empty or cut short:
+// ReadConfig reads it again, up to configReads times in all, configReadGap
+// apart, while what it finds does not decode. No config.xml, which read
+// reports as fs.ErrNotExist, is nil and no error, since a setup that sets
+// everything in the environment needs none. Any other error from read
+// ends it at once, as one that starts "config.xml is unreadable:". A
+// config.xml still invalid at the last read, or when ctx ends the wait
+// for the next, is an error that starts "config.xml is invalid:".
+func ReadConfig(ctx context.Context, read func() ([]byte, error)) ([]byte, error) {
+	var invalid error
+	for n := range configReads {
+		if n > 0 {
+			wait := time.NewTimer(configReadGap)
+			select {
+			case <-ctx.Done():
+				wait.Stop()
+				return nil, fmt.Errorf("config.xml is invalid: %w; stopped reading it again: %w", invalid, context.Cause(ctx))
+			case <-wait.C:
+			}
+		}
+		b, err := read()
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("config.xml is unreadable: %w", err)
+		}
+		if invalid = xml.Unmarshal(b, new(fileConfig)); invalid == nil {
+			return b, nil
+		}
+	}
+	return nil, fmt.Errorf("config.xml is invalid: %w", invalid)
+}
+
 // fileConfig is what the probe reads from config.xml.
 type fileConfig struct {
 	APIKey  string `xml:"ApiKey"`
 	URLBase string `xml:"UrlBase"`
 }
 
-// readConfig decodes the config.xml configXML opens, or says why it could
-// not.
-func readConfig(configXML func() (io.ReadCloser, error)) (fileConfig, error) {
+// readConfig decodes the config.xml configXML gives, nil when it gives
+// none, or says why it could not.
+func readConfig(configXML func() ([]byte, error)) (*fileConfig, error) {
+	b, err := configXML()
+	if err != nil || b == nil {
+		return nil, err
+	}
 	var c fileConfig
-	r, err := configXML()
-	if err != nil {
-		return c, fmt.Errorf("config.xml is unreadable: %w", err)
+	if err := xml.Unmarshal(b, &c); err != nil {
+		return nil, fmt.Errorf("config.xml is invalid: %w", err)
 	}
-	defer func() { _ = r.Close() }()
-	if err := xml.NewDecoder(r).Decode(&c); err != nil {
-		return c, fmt.Errorf("config.xml is invalid: %w", err)
-	}
-	return c, nil
+	return &c, nil
 }
 
 // noRedirects reports a redirect as its status instead of following it:

@@ -5,11 +5,17 @@ package probe_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/divbast/sonarr-oci-image/internal/probe"
@@ -137,7 +143,7 @@ func TestProbeURLBase(t *testing.T) {
 	h.prefix = "/sonarr"
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	base := probe.Base(func(k string) string {
+	base, err := probe.Base(func(k string) string {
 		switch k {
 		case "SONARR__SERVER__URLBASE":
 			return "sonarr/"
@@ -146,8 +152,8 @@ func TestProbeURLBase(t *testing.T) {
 		}
 		return ""
 	}, missing)
-	if want := srv.URL + "/sonarr"; base != want {
-		t.Fatalf("Base = %q, want %q", base, want)
+	if want := srv.URL + "/sonarr"; err != nil || base != want {
+		t.Fatalf("Base = %q, %v; want %q", base, err, want)
 	}
 	o := opts()
 	o.Base = base
@@ -159,9 +165,9 @@ func TestProbeURLBase(t *testing.T) {
 
 func TestBaseDefaults(t *testing.T) {
 	t.Parallel()
-	got := probe.Base(func(string) string { return "" }, missing)
-	if want := "http://127.0.0.1:8080"; got != want {
-		t.Fatalf("Base = %q, want %q", got, want)
+	got, err := probe.Base(func(string) string { return "" }, missing)
+	if want := "http://127.0.0.1:8080"; err != nil || got != want {
+		t.Fatalf("Base = %q, %v; want %q", got, err, want)
 	}
 }
 
@@ -183,7 +189,7 @@ func TestBaseURLBase(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		getenv func(string) string
-		file   func() (io.ReadCloser, error)
+		file   func() ([]byte, error)
 		want   string
 	}{
 		{name: "env wins over config.xml", getenv: env("/sonarr"), file: urlBaseFile("/other"), want: root + "/sonarr"},
@@ -194,30 +200,214 @@ func TestBaseURLBase(t *testing.T) {
 		{name: "config.xml's / is none", getenv: env(""), file: urlBaseFile("/"), want: root},
 		{name: "config.xml's empty UrlBase is none", getenv: env(""), file: urlBaseFile(""), want: root},
 		{name: "config.xml with no UrlBase is none", getenv: env(""), file: file(`<Config><ApiKey>k</ApiKey></Config>`), want: root},
-		{name: "an invalid config.xml is none", getenv: env(""), file: file(`<Config><UrlBase>`), want: root},
 		{name: "neither is none", getenv: env(""), file: missing, want: root},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := probe.Base(tc.getenv, tc.file); got != tc.want {
-				t.Fatalf("Base = %q, want %q", got, tc.want)
+			if got, err := probe.Base(tc.getenv, tc.file); err != nil || got != tc.want {
+				t.Fatalf("Base = %q, %v; want %q", got, err, tc.want)
 			}
 		})
 	}
 }
 
-// file opens a config.xml holding xml.
-func file(xml string) func() (io.ReadCloser, error) {
-	return func() (io.ReadCloser, error) { return reader{strings.NewReader(xml)}, nil }
+// TestBaseReportsInvalidConfig has Base find config.xml invalid while
+// SONARR__SERVER__URLBASE is unset: as ReadConfig gives one still invalid
+// after its re-reads, and as bytes that do not decode. Base must say so,
+// not guess there is no URL base, since that guess sends the probe where
+// Sonarr only redirects. With SONARR__SERVER__URLBASE set, config.xml is
+// not needed, and so is no error.
+func TestBaseReportsInvalidConfig(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			file func() ([]byte, error)
+		}{
+			{name: "as ReadConfig gives up on it", file: func() ([]byte, error) {
+				return probe.ReadConfig(t.Context(), newRewrite(partial).read)
+			}},
+			{name: "as bytes that do not decode", file: file(partial)},
+		} {
+			base, err := probe.Base(func(string) string { return "" }, tc.file)
+			if base != "" || err == nil ||
+				!strings.Contains(err.Error(), "SONARR__SERVER__URLBASE") || !strings.Contains(err.Error(), "config.xml is invalid:") {
+				t.Errorf("%s: Base = %q, %v; want no base and an error naming SONARR__SERVER__URLBASE and an invalid config.xml", tc.name, base, err)
+			}
+		}
+		base, err := probe.Base(func(k string) string {
+			if k == "SONARR__SERVER__URLBASE" {
+				return "/sonarr"
+			}
+			return ""
+		}, file(partial))
+		if want := "http://127.0.0.1:8080/sonarr"; err != nil || base != want {
+			t.Errorf("with SONARR__SERVER__URLBASE set: Base = %q, %v; want %q", base, err, want)
+		}
+	})
 }
 
-// urlBaseFile opens a config.xml whose UrlBase is v.
-func urlBaseFile(v string) func() (io.ReadCloser, error) {
-	return file("<Config><Port>8080</Port><UrlBase>" + v + "</UrlBase></Config>")
+// partial is config.xml as a read can find it while Sonarr writes it:
+// cut off part way through.
+const partial = "<Config>\n  <UrlBase>/sonarr</Url"
+
+// rewrite is config.xml as Sonarr rewrites it in place, read again and
+// again: each read gives the next of contents, and the last once they run
+// out. at holds when each read came, on synctest's clock, from when the
+// rewrite was made.
+type rewrite struct {
+	start    time.Time
+	contents []string
+	at       []time.Duration
 }
 
-// missing is a config.xml that cannot be opened.
-func missing() (io.ReadCloser, error) { return nil, io.ErrUnexpectedEOF }
+func newRewrite(contents ...string) *rewrite {
+	return &rewrite{start: time.Now(), contents: contents}
+}
+
+func (r *rewrite) read() ([]byte, error) {
+	r.at = append(r.at, time.Since(r.start))
+	return []byte(r.contents[min(len(r.at), len(r.contents))-1]), nil
+}
+
+// TestReadConfigRetriesTruncated has the first read find config.xml as
+// Sonarr leaves it between truncating it and writing it again: empty.
+// ReadConfig must read it again 40 ms later, and return what that read
+// gives.
+func TestReadConfigRetriesTruncated(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		valid := urlBaseXML("/sonarr")
+		r := newRewrite("", valid)
+		got, err := probe.ReadConfig(t.Context(), r.read)
+		if err != nil || string(got) != valid {
+			t.Fatalf("ReadConfig = %q, %v; want %q", got, err, valid)
+		}
+		if want := []time.Duration{0, 40 * time.Millisecond}; !slices.Equal(r.at, want) {
+			t.Fatalf("reads came at %v, want %v", r.at, want)
+		}
+	})
+}
+
+// TestReadConfigMissing reads a /config that holds no config.xml, through
+// os.Root as the probe does. That is nothing and no error, at once: a
+// setup that sets everything in the environment needs no config.xml.
+func TestReadConfigMissing(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		root, err := os.OpenRoot(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = root.Close() })
+		start, reads := time.Now(), 0
+		got, err := probe.ReadConfig(t.Context(), func() ([]byte, error) {
+			reads++
+			return root.ReadFile("config.xml")
+		})
+		if got != nil || err != nil {
+			t.Fatalf("ReadConfig = %q, %v; want nil and no error", got, err)
+		}
+		if took := time.Since(start); reads != 1 || took != 0 {
+			t.Fatalf("ReadConfig read %d times over %v; want once, with no wait", reads, took)
+		}
+	})
+}
+
+// TestReadConfigUnreadable has the first read fail for a reason other
+// than config.xml's absence: permission denied, as os.Root reports it. A
+// read after it would find a valid config.xml, but a refused read is no
+// file caught mid-write: ReadConfig must not read it again, and must
+// return an error that starts "config.xml is unreadable:", which Base must
+// then report rather than guess there is no URL base.
+func TestReadConfigUnreadable(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		start, reads := time.Now(), 0
+		read := func() ([]byte, error) {
+			reads++
+			if reads == 1 {
+				return nil, &fs.PathError{Op: "openat", Path: "config.xml", Err: fs.ErrPermission}
+			}
+			return []byte(urlBaseXML("/sonarr")), nil
+		}
+		got, err := probe.ReadConfig(t.Context(), read)
+		if got != nil || !errors.Is(err, fs.ErrPermission) || !strings.HasPrefix(err.Error(), "config.xml is unreadable:") {
+			t.Fatalf("ReadConfig = %q, %v; want nil and an error starting %q that is fs.ErrPermission", got, err, "config.xml is unreadable:")
+		}
+		if took := time.Since(start); reads != 1 || took != 0 {
+			t.Fatalf("ReadConfig read %d times over %v; want once, with no wait", reads, took)
+		}
+		reads = 0
+		base, err := probe.Base(func(string) string { return "" }, func() ([]byte, error) {
+			return probe.ReadConfig(t.Context(), read)
+		})
+		if base != "" || err == nil ||
+			!strings.Contains(err.Error(), "SONARR__SERVER__URLBASE") || !strings.Contains(err.Error(), "config.xml is unreadable:") {
+			t.Fatalf("Base = %q, %v; want no base and an error naming SONARR__SERVER__URLBASE and an unreadable config.xml", base, err)
+		}
+	})
+}
+
+// TestReadConfigPersistentlyInvalid has every read find config.xml cut
+// off part way through. ReadConfig must read it 5 times, 40 ms apart,
+// then stop, with no wait after the last read, and an error that starts
+// "config.xml is invalid:".
+func TestReadConfigPersistentlyInvalid(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		r := newRewrite(partial)
+		got, err := probe.ReadConfig(t.Context(), r.read)
+		if got != nil || err == nil || !strings.HasPrefix(err.Error(), "config.xml is invalid:") {
+			t.Fatalf("ReadConfig = %q, %v; want nil and an error starting %q", got, err, "config.xml is invalid:")
+		}
+		want := []time.Duration{0, 40 * time.Millisecond, 80 * time.Millisecond, 120 * time.Millisecond, 160 * time.Millisecond}
+		if !slices.Equal(r.at, want) {
+			t.Fatalf("reads came at %v, want %v", r.at, want)
+		}
+		if took := time.Since(r.start); took != want[len(want)-1] {
+			t.Fatalf("ReadConfig took %v, want %v: no wait after the last read", took, want[len(want)-1])
+		}
+	})
+}
+
+// TestReadConfigCancelled ends ReadConfig's context 60 ms in, while it
+// waits to read a config.xml that is cut off for the third time. It must
+// stop waiting then, with an error that says config.xml is invalid and
+// that the wait was cut short.
+func TestReadConfigCancelled(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		time.AfterFunc(60*time.Millisecond, cancel)
+		r := newRewrite(partial)
+		got, err := probe.ReadConfig(ctx, r.read)
+		if got != nil || !errors.Is(err, context.Canceled) || !strings.HasPrefix(err.Error(), "config.xml is invalid:") {
+			t.Fatalf("ReadConfig = %q, %v; want nil and an error starting %q that is context.Canceled", got, err, "config.xml is invalid:")
+		}
+		if took := time.Since(r.start); took != 60*time.Millisecond || len(r.at) != 2 {
+			t.Fatalf("ReadConfig read %d times over %v; want twice over 60ms", len(r.at), took)
+		}
+	})
+}
+
+// file gives a config.xml holding xml.
+func file(xml string) func() ([]byte, error) {
+	return func() ([]byte, error) { return []byte(xml), nil }
+}
+
+// urlBaseXML is a config.xml whose UrlBase is v.
+func urlBaseXML(v string) string {
+	return "<Config><Port>8080</Port><UrlBase>" + v + "</UrlBase></Config>"
+}
+
+// urlBaseFile gives a config.xml whose UrlBase is v.
+func urlBaseFile(v string) func() ([]byte, error) { return file(urlBaseXML(v)) }
+
+// missing is no config.xml, as ReadConfig gives it: nothing, and no
+// error.
+func missing() ([]byte, error) { return nil, nil }
 
 func TestProbeWithin(t *testing.T) {
 	t.Parallel()
@@ -234,10 +424,6 @@ func TestProbeWithin(t *testing.T) {
 	}
 }
 
-type reader struct{ io.Reader }
-
-func (reader) Close() error { return nil }
-
 func TestAPIKey(t *testing.T) {
 	t.Parallel()
 	keyFile := file(`<Config><ApiKey>fromfile</ApiKey><Port>8080</Port></Config>`)
@@ -252,7 +438,7 @@ func TestAPIKey(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		getenv  func(string) string
-		file    func() (io.ReadCloser, error)
+		file    func() ([]byte, error)
 		want    string
 		wantErr []string
 	}{
@@ -262,9 +448,8 @@ func TestAPIKey(t *testing.T) {
 		{name: "file with white space around the key, as Sonarr trims it", getenv: env(""), file: file("<Config><ApiKey>\n  fromfile \t</ApiKey></Config>"), want: "fromfile"},
 		{name: "file with white space alone is no key", getenv: env(""), file: file("<Config><ApiKey> \n </ApiKey></Config>"), wantErr: []string{"SONARR__AUTH__APIKEY", "config.xml"}},
 		{name: "neither", getenv: env(""), file: missing, wantErr: []string{"SONARR__AUTH__APIKEY", "config.xml"}},
-		{name: "no key in file", getenv: env(""), file: func() (io.ReadCloser, error) {
-			return reader{strings.NewReader(`<Config></Config>`)}, nil
-		}, wantErr: []string{"SONARR__AUTH__APIKEY", "config.xml"}},
+		{name: "an invalid config.xml", getenv: env(""), file: file(partial), wantErr: []string{"SONARR__AUTH__APIKEY", "config.xml is invalid"}},
+		{name: "no key in file", getenv: env(""), file: file(`<Config></Config>`), wantErr: []string{"SONARR__AUTH__APIKEY", "config.xml"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

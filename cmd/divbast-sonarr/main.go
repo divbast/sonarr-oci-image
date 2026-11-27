@@ -19,11 +19,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/divbast/sonarr-oci-image/internal/probe"
@@ -33,6 +32,8 @@ import (
 var version = "dev"
 
 // within bounds each half of health, so both fit the HEALTHCHECK's 10 s.
+// It bounds the waits to re-read a config.xml caught mid-write too,
+// though those come to 160 ms at most.
 const within = 4 * time.Second
 
 func main() {
@@ -55,31 +56,36 @@ func usage() {
 }
 
 func health() int {
-	configXML := readConfigXML()
+	ctx, cancel := context.WithTimeout(context.Background(), within)
+	defer cancel()
+	configXML := readConfigXML(ctx)
 	key, err := probe.APIKey(os.Getenv, configXML)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "status:", err)
 		return 1
 	}
+	base, err := probe.Base(os.Getenv, configXML)
+	if err != nil {
+		// Neither half can be asked without the URL base
+		fmt.Fprintln(os.Stderr, "ping:", err)
+		fmt.Fprintln(os.Stderr, "status:", err)
+		return 1
+	}
 	return probe.Probe(context.Background(), probe.Options{
-		Base:    probe.Base(os.Getenv, configXML),
+		Base:    base,
 		APIKey:  key,
 		Version: version,
 		Within:  within,
 	}, os.Stderr)
 }
 
-// readConfigXML reads /config/config.xml, confined to /config, once, and
-// returns what opens what it read, or gives why it could not, each time it
-// is called: the API key and the URL base both come from that one read.
-func readConfigXML() func() (io.ReadCloser, error) {
-	b, err := readFile()
-	return func() (io.ReadCloser, error) {
-		if err != nil {
-			return nil, err
-		}
-		return io.NopCloser(bytes.NewReader(b)), nil
-	}
+// readConfigXML returns what reads /config/config.xml, confined to
+// /config, through probe.ReadConfig within ctx. The first call reads it,
+// again if it is caught mid-write, and every call gives what that read
+// found: the API key and the URL base both come from it. A setup that
+// sets both in the environment never reads it, nor waits on it.
+func readConfigXML(ctx context.Context) func() ([]byte, error) {
+	return sync.OnceValues(func() ([]byte, error) { return probe.ReadConfig(ctx, readFile) })
 }
 
 // readFile reads /config/config.xml, confined to /config.
