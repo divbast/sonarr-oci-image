@@ -11,9 +11,9 @@ name: stall
 on:
   schedule:
     # Midway between two daily slots, which GitHub starts hours after
-    # build.yml's 20:07 UTC. Six minutes after oci-image-template's stall
+    # build.yml's 20:07 UTC. Nine minutes after oci-image-template's stall
     # check, so the two never start together.
-    - cron: '41 12 * * *'
+    - cron: '44 12 * * *'
   workflow_dispatch:
 
 permissions: {}
