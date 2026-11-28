@@ -22,7 +22,7 @@
     },
     {
       "customType": "regex",
-      "description": "The watch for Sonarr's first stable v5 release: the Containerfile's '# SONARR_STABLE_V5=' line, which no build reads. It sits in the Containerfile because the recommended preset ignores every path under test/. It is the same repository's GitHub releases under another name, offered only those GitHub calls stable and whose version is 5 (the rule below), so nothing moves it until upstream publishes v5 stable; then test/stable's TestNoV5StableYet fails its pull request with the steps in CLAUDE.md, 'Moving to stable'. Its floor, 0.0.0.0, shares no major, minor and patch with any release: Renovate offers a pre-release that shares all three with the current version, and every v5 develop build is 5.0.0.N. The v is added and taken off as for the develop line, with the same versioning.",
+      "description": "The watch for Sonarr's first stable v5 release: the Containerfile's '# SONARR_STABLE_V5=' line, which no build reads. It is the same repository's GitHub releases under another name, offered only those GitHub calls stable and whose version is 5 (the rule below), so nothing moves it until upstream publishes v5 stable; then test/stable's TestNoV5StableYet fails its pull request with the steps in CLAUDE.md, 'Moving to stable'. Its floor, 0.0.0.0, shares no major, minor and patch with any release: Renovate offers a pre-release that shares all three with the current version, and every v5 develop build is 5.0.0.N. The v is added and taken off as for the develop line, with the same versioning.",
       "managerFilePatterns": [
         "/^Containerfile$/"
       ],
