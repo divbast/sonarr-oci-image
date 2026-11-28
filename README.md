@@ -26,8 +26,9 @@ which are the release and the commit its tag names. It runs on Docker
 Hardened Images' [`aspnetcore`](https://hub.docker.com/hardened-images/catalog)
 for Debian 13: the .NET runtime, ICU and OpenSSL, no shell and no package
 manager. The app is built framework-dependent, so rebuilding the image
-patches the runtime. Every stage of the build is also a DHI image, and CI
-refuses to build until Docker's signature on each is verified:
+patches the runtime. Every stage of the build but ffprobe's carrier,
+below, is also a DHI image, and CI refuses to build until Docker's
+signature on each is verified, and the carrier's attestation:
 
 - `fetch` checks out the commit and asserts the release's tag still names
   it.
@@ -40,6 +41,20 @@ refuses to build until Docker's signature on each is verified:
   errors: the scan already blocks a vulnerable package the image does not
   ship yet, and an error would hold back every other update until upstream
   moved.
+- ffprobe, which Sonarr runs to read media files, is not built here: the
+  final image copies it, with its licences and patches, from the
+  `ghcr.io/divbast/ffmpeg:servarr` carrier of
+  [divbast/native-tools](https://github.com/divbast/native-tools), by
+  digest. ci verifies that digest's attestation before the image builds.
+  It decodes video, so Sonarr reads the bit depth and HDR format of a
+  file, and links to the base's C library, mathematics library and zlib.
+  The `ffprobe-check` stage holds it to what the base ships and to
+  position-independence, binding at load and a read-only relocation table.
+  Publish also writes the ffprobe that NuGet ships with Sonarr's
+  project; `backend` removes it, so the image holds one.
+- `sbom` writes an SBOM of ffprobe, which the scan reads: its components
+  are the carrier's own, with their CPEs, and only their path here is
+  added.
 - `probe` builds the health probe, a static Go binary on the standard
   library alone.
 
@@ -309,8 +324,8 @@ There is no shell in the image, so these cannot work:
 - Any other interpreted script.
 
 A static binary on a mount still runs, unless you mount it from somewhere
-`noexec`. `ffprobe`, which Sonarr runs to read media files, is a static
-binary in the image itself.
+`noexec`. `ffprobe`, which Sonarr runs to read media files, is a binary in
+the image itself.
 
 ## Media and hardlinks
 
@@ -400,7 +415,8 @@ Docker as its updater on `develop`, is healthy under every authentication
 method and URL base, refuses an unwritable or missing `/config`, exits on a
 startup failure, runs on a `/config` a v4 image left, makes and serves a
 backup within the `/tmp` it is given, restores one through the UI's
-upload, and runs `ffprobe`.
+upload, runs `ffprobe`, and has it read a 10-bit HDR10 sample's pixel
+format, colour and frame side data.
 
 ### Publishing
 

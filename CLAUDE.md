@@ -209,7 +209,8 @@ breaking change.
   signature on each DHI image, the runtime and **every stage's image**:
   the fetch and frontend stages' `dhi.io/node` `-dev`, the backend's
   `dhi.io/dotnet` SDK and the probe's `dhi.io/golang` `-dev`. Every stage
-  is DHI, so one publisher signs every builder. A local `just build` does
+  is DHI but for the ffprobe carrier, which divbast's own attestation
+  covers, so one publisher signs every builder. A local `just build` does
   not verify, and needs `docker login dhi.io`; `just ci-tools &&
   .ci/bin/divbast-verify-images` verifies, with cosign from `mise.toml`
 - **No binary may carry a file capability.** A binary with a file
@@ -277,13 +278,45 @@ breaking change.
   package.json would be skipped without a word, and the UI built without
   whatever it did: read a Sonarr bump's package.json changes for one. The
   fix is to name why in the Containerfile, not to drop the flag quietly
-- **ffprobe gets its execute bit back.** NuGet extracts it without one, as
-  upstream's packaging finds too; the backend stage `chmod`s it and asserts
-  it is executable, and `TestFFprobeRuns` runs it
-- **Every stage is DHI.** The fetch runs in the Node `-dev` image, which
-  ships git, the probe in the Go `-dev` image, and the frontend in the same
-  Node image, with yarn 1 and `--frozen-lockfile`. Never add a stage from
-  another publisher, and never set `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT`:
+- **ffprobe is not built here, and not NuGet's.** The final stage copies
+  `/bin/ffprobe` to `/app/bin/ffprobe`, and its licences and patches to
+  `/usr/local/share/doc/ffmpeg` and `/usr/local/share/doc/dav1d`, from the
+  `ghcr.io/divbast/ffmpeg:servarr` carrier of divbast/native-tools, by
+  digest: see that repository's README, "Using a carrier".
+  `divbast-verify-images` checks the digest's attestation, and Renovate's
+  dockerfile manager moves it. A change to how ffprobe is built is a change
+  there. Sonarr's publish still writes NuGet's `Openur.FFprobeStatic`
+  ffprobe, which upstream's project references and the build restores; the
+  backend stage removes it and fails if anything named ffprobe is left in
+  `/out`, so the image holds one ffprobe. Do not put it back: NuGet's
+  needed no `chmod` only because the stage gave it its execute bit, and the
+  carrier's has one
+- **ffprobe must decode.** Sonarr works out a file's bit depth from the
+  `pix_fmt` ffprobe reports, and takes 8 bits when there is none, and its
+  HDR check returns none for any file under 10 bits. A build of ffprobe
+  without video decoders starts, passes `-version` and exits 0 on every
+  file, and so makes Sonarr name every HDR file as SDR with no error.
+  `TestFFprobeReadsHDR10` runs Sonarr's own analysis command lines on an
+  HDR10 sample and holds a 10-bit `pix_fmt`, PQ, BT.2020 and one frame with
+  its side data. The carrier is the `servarr` variant for this reason, not
+  `bazarr`'s
+- **ffprobe passes `check-elf` against the runtime.** The `ffprobe-check`
+  stage holds it to position-independent, `BIND_NOW`, `GNU_RELRO` and no
+  library the runtime image does not ship, read from that image's own
+  tree; the binary the final stage copies is the one it checked
+- **The SBOM is the carrier's.** The `sbom` stage takes the ffmpeg and
+  dav1d components from the carrier's `/records/sbom.cdx.json` as they are,
+  with their versions, licences, sources, patches and CPEs, and adds only
+  the binary's path; it fails if either lacks a CPE and a purl. The label
+  is `io.github.divbast.scan.sboms`, which ci's scan reads, since no
+  scanner sees a binary copied in otherwise
+- **Every stage is DHI**, but for the one carrier. The fetch runs in the
+  Node `-dev` image, which ships git, the probe in the Go `-dev` image, and
+  the frontend in the same Node image, with yarn 1 and `--frozen-lockfile`;
+  the ffprobe check runs in the Go `-dev` image, which has `readelf`, and
+  the SBOM is written in the Node one. The one stage from another
+  publisher is divbast's own ffprobe carrier, whose attestation ci
+  verifies. Never add another, and never set `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT`:
   it breaks name matching and release parsing
 - **The probe is stdlib Go.** `cmd/divbast-sonarr` and `internal/probe`
   import nothing outside the standard library, since the build context
@@ -512,9 +545,11 @@ step needs the user's go-ahead:
   signed VEX statements for the runtime image, so Trivy's reading of DHI's
   `+dhiN` packages as plain Debian ones does not over-report
 - REUSE-compliant SPDX headers on every file; licence is **GPL-3.0-only**.
-  The image's licences label names only that. Sonarr's own licence file
+  The image's licences label adds what ffprobe ships under: FFmpeg's
+  GPL-2.0-or-later and dav1d's BSD-2-Clause. Sonarr's own licence file
   ships in `/app/bin/LICENSE.md`, where upstream's tarball puts it, and the
-  label and the README say nothing more of it
+  label and the README say nothing more of it. ffprobe's licences are in
+  `/usr/local/share/doc/ffmpeg` and `/usr/local/share/doc/dav1d`
 - **The acceptance suite is Go, on divbast/ci's harness.** Every
   container that runs Sonarr runs under `harness.Contract("64m")`, the
   *exact* confinement the contract claims, `--security-opt
