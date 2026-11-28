@@ -134,9 +134,10 @@ RUN --network=none dotnet msbuild src/Sonarr.sln -t:PublishAllRids @/tmp/build.r
 # is found rather than named, and must be the only one: none means publish
 # wrote it somewhere else, and with several nothing says which is the app.
 # nullglob, for the find alone, makes no match an empty list rather than
-# the pattern itself. NuGet extracts ffprobe, which Sonarr runs to read
-# media files, without its execute bit, as upstream's packaging finds too;
-# it is a static binary, so it needs nothing else from the base. Branch is
+# the pattern itself. Publish writes NuGet's ffprobe among the app's files,
+# which the build needs restored; it is removed here, and nothing named
+# ffprobe may remain in /out, because the image's ffprobe comes from the
+# carrier below, and a second one is one more binary to patch. Branch is
 # develop until the image moves to stable: CLAUDE.md, 'Moving to stable'.
 RUN rid=$(</tmp/rid); \
     shopt -s nullglob; \
@@ -150,8 +151,11 @@ RUN rid=$(</tmp/rid); \
     cp -a "${published[0]}" /out/bin; \
     rm /out/bin/Sonarr.Windows.* /out/bin/ServiceInstall* /out/bin/ServiceUninstall*; \
     test ! -e /out/bin/Sonarr.Update; \
-    chmod 0755 /out/bin/ffprobe; \
-    test -x /out/bin/ffprobe; \
+    rm /out/bin/ffprobe; \
+    if [ -n "$(find /out -iname 'ffprobe*')" ]; then \
+        echo "ERROR: publish wrote ffprobe somewhere besides /out/bin/ffprobe, which the carrier's replaces: $(find /out -iname 'ffprobe*')" >&2; \
+        exit 1; \
+    fi; \
     printf '%s\n' "PackageVersion=${SONARR_VERSION}" \
         'PackageAuthor=[divbast](https://github.com/divbast/sonarr-oci-image)' \
         UpdateMethod=Docker Branch=develop >/out/package_info
@@ -171,6 +175,75 @@ ARG RUNTIME_IMAGE
 # fails a mismatch with the steps to take. It reads /out/bin once nothing
 # more is written there, so what it passes is what ships.
 RUN /tmp/runtime-major.sh /out/bin "${RUNTIME_IMAGE}"
+
+# ffprobe, which Sonarr runs to read media files, built once in
+# divbast/native-tools from FFmpeg's source and attested there: ci's
+# divbast-verify-images checks the attestation of this digest before the
+# image builds, and Renovate moves the digest. It holds ffprobe alone, with
+# every video decoder, dav1d linked in and no network protocol, so it reads
+# the bit depth and the HDR format of a file, which a decoder-less ffprobe
+# does not. The one digest is every later stage's.
+FROM ghcr.io/divbast/ffmpeg:servarr@sha256:dddfdda55d28ed9a239287e12d396ce6efb6ea027927ef685328d7bac8a9e180 AS ffprobe
+
+# The runtime image as a stage of its own, for the check below to read the
+# libraries of: COPY --from takes no variable.
+FROM ${RUNTIME_IMAGE} AS runtime
+
+# The check ffprobe must pass: position-independent, bound at load, with a
+# read-only relocation table, and needing no library the runtime image does
+# not ship, read from that image's own tree. The Go -dev image has readelf.
+# The binary the final image copies is the one this stage checked.
+FROM dhi.io/golang:1.27.4-debian13-dev@sha256:c5c02f15e0fd96999d48d70545b7c76b7080caebc9367680812d5244ac316bee AS ffprobe-check
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+COPY --from=runtime /usr/lib /runtime/usr/lib
+RUN install -d /usr/local/bin && cat >/usr/local/bin/check-elf <<'EOF' && chmod 0755 /usr/local/bin/check-elf
+#!/bin/bash
+set -euo pipefail
+bin=$1
+readelf -h "${bin}" | grep -q 'Type: *DYN' || { echo "ERROR: ${bin} is not position-independent" >&2; exit 1; }
+readelf -d "${bin}" | grep -Eq 'BIND_NOW|FLAGS_1.* NOW' || { echo "ERROR: ${bin} is not bound at load (BIND_NOW)" >&2; exit 1; }
+readelf -lW "${bin}" | grep -q GNU_RELRO || { echo "ERROR: ${bin} has no RELRO segment" >&2; exit 1; }
+for lib in $(readelf -d "${bin}" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
+    if ! find /runtime -name "${lib}" -print -quit | grep -q .; then
+        echo "ERROR: ${bin} needs ${lib}, which the runtime image does not ship" >&2
+        exit 1
+    fi
+    echo "${bin} needs ${lib}"
+done
+EOF
+
+COPY --from=ffprobe --chmod=0755 /bin/ffprobe /out/ffprobe
+RUN check-elf /out/ffprobe
+
+# The SBOM of what no scanner sees in the image: ffprobe, which the carrier
+# describes in its own records, each component by the identifier the scan
+# matches it by. ci's divbast-scan reads it through the label below. The
+# components stay as the carrier gave them, with their versions, licences,
+# sources, patches and CPEs; this adds only where the binary sits in this
+# image, and fails the build if a component names nothing the scan can
+# match it by.
+FROM dhi.io/node:26.13.1-debian13-dev@sha256:d4d70223ec5fa176c9f19eb98f8bdd14035b166c2dbfb75e4cc71ea44234f911 AS sbom
+COPY --from=ffprobe /records/sbom.cdx.json /tmp/sbom/ffprobe.cdx.json
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+RUN install -d /out \
+    && node - >/out/sbom.cdx.json <<'EOF'
+const fs = require("fs");
+const carrier = JSON.parse(fs.readFileSync("/tmp/sbom/ffprobe.cdx.json", "utf8"));
+const components = carrier.components;
+const names = components.map((c) => c.name).sort().join(",");
+if (names !== "dav1d,ffmpeg") {
+    console.error(`the carrier's SBOM must hold the components dav1d and ffmpeg, not: ${names}`);
+    process.exit(1);
+}
+for (const c of components) {
+    if (!c.cpe && !c.purl) {
+        console.error(`the carrier's ${c.name} component has neither a cpe nor a purl, so the scan could not match it`);
+        process.exit(1);
+    }
+    (c.properties ??= []).push({ name: "path", value: "/app/bin/ffprobe" });
+}
+process.stdout.write(JSON.stringify({ bomFormat: "CycloneDX", specVersion: "1.6", version: 1, components }, null, 2) + "\n");
+EOF
 
 # The image's health probe, static and on the standard library alone.
 FROM dhi.io/golang:1.27.4-debian13-dev@sha256:c5c02f15e0fd96999d48d70545b7c76b7080caebc9367680812d5244ac316bee AS probe
@@ -195,6 +268,14 @@ COPY --from=backend /out/package_info /app/package_info
 # Sonarr's licence, where upstream's release tarball puts it: its packaging
 # copies it into the tarball's Sonarr/ folder, which is this /app/bin
 COPY --from=fetch /src/LICENSE.md /app/bin/LICENSE.md
+# ffprobe, from the carrier through the stage that checked it, to where
+# Sonarr looks for it: beside its own binary. Its licences and the patches
+# its build applied, which its licence asks to be passed on, and its SBOM,
+# which the scan reads, come with it.
+COPY --from=ffprobe-check /out/ffprobe /app/bin/ffprobe
+COPY --from=ffprobe /doc/ffmpeg /usr/local/share/doc/ffmpeg
+COPY --from=ffprobe /doc/dav1d /usr/local/share/doc/dav1d
+COPY --from=sbom /out/sbom.cdx.json /usr/local/share/divbast/sbom.cdx.json
 COPY --from=probe /out/divbast-sonarr /usr/local/bin/divbast-sonarr
 # The data directory, empty and uid 65532's, and not a VOLUME: a new named
 # volume mounted here takes its owner from it, so Sonarr can write to it.
@@ -222,7 +303,8 @@ LABEL org.opencontainers.image.source="https://github.com/divbast/sonarr-oci-ima
     org.opencontainers.image.url="https://github.com/divbast/sonarr-oci-image" \
     org.opencontainers.image.title="Sonarr" \
     org.opencontainers.image.version="${SONARR_VERSION}" \
-    org.opencontainers.image.licenses="GPL-3.0-only"
+    org.opencontainers.image.licenses="GPL-3.0-only AND GPL-2.0-or-later AND BSD-2-Clause" \
+    io.github.divbast.scan.sboms="/usr/local/share/divbast/sbom.cdx.json"
 
 EXPOSE 8080
 # Exec form: the shell form would need /bin/sh, which the image lacks.
